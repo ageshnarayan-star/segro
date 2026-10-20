@@ -1,0 +1,86 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Segro Bus</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;background:#f3f6fa;color:#1f2a44}
+header{background:#1b2a5c;color:#fff;padding:14px 18px;font-weight:bold}
+main{max-width:600px;margin:16px auto;padding:0 14px}
+.card{background:#fff;border-radius:10px;padding:16px;margin-bottom:14px;box-shadow:0 1px 3px #0002}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs button{flex:1;background:#dfe6f2;color:#1b2a5c;margin:0}
+.tabs button.on{background:#0f9d9a;color:#fff}
+input,select,textarea,button{width:100%;padding:10px;margin:6px 0;font-size:16px;box-sizing:border-box}
+button{background:#0f9d9a;color:#fff;border:0;border-radius:8px;cursor:pointer}
+button.alt{background:#1b2a5c}.msg{font-weight:bold;margin-top:8px}.note{font-size:13px;color:#55657e}
+table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #ddd;text-align:left;font-size:14px}
+.row{display:flex;gap:6px}.hide{display:none}
+</style></head><body><header>Segro Bus <span style="font-weight:normal">(prototype: sample data only)</span></header><main>
+<div id="auth" class="card"><h3>Choose your portal</h3>
+<div class="tabs"><button id="t-college" onclick="pick('college')">College</button>
+<button id="t-private" onclick="pick('private')">Private organisation</button>
+<button id="t-government" onclick="pick('government')">Government buses</button></div>
+<p id="blurb" class="note"></p>
+<select id="org"></select>
+<input id="name" placeholder="Full name (sign up only)">
+<input id="lid" placeholder="ID"><input id="pw" type="password" placeholder="Password (8+ characters)">
+<button onclick="login()">Sign in</button><button class="alt" id="signupbtn" onclick="signup()">Sign up</button>
+<div id="amsg" class="msg"></div></div>
+
+<div id="rider" class="card hide"><h3>My bus</h3><div id="info"></div>
+<button class="alt" onclick="logout()">Sign out</button></div>
+
+<div id="staff" class="card hide"><h3>Dashboard</h3><div id="dash"></div>
+<h4>Manual boarding (fallback)</h4><input id="mid" placeholder="Rider ID"><input id="mbus" placeholder="Bus number">
+<input id="mshift" placeholder="Shift (optional, e.g. NIGHT)">
+<button onclick="board()">Board rider</button><div id="bmsg" class="msg"></div>
+<button class="alt" onclick="logout()">Sign out</button></div>
+
+<div id="admin" class="card hide"><h3>Administrator</h3>
+<h4>Add or update a bus</h4>
+<div class="row"><input id="bn" placeholder="Bus no."><input id="bc" type="number" placeholder="Seats"></div>
+<button onclick="addBus()">Save bus</button><div id="busmsg" class="note"></div>
+<h4>Riders</h4><button class="alt" onclick="riders()">Refresh list</button><div id="riders"></div>
+<div class="row"><input id="al" placeholder="Rider ID"><input id="ab" placeholder="Bus no. (blank clears)"></div>
+<button onclick="assign()">Assign bus</button>
+<button onclick="enrol()">Link a card: then tap it on the scanner</button><div id="rmsg" class="note"></div>
+<h4>Import riders (CSV: login_id,name,bus)</h4>
+<textarea id="csv" rows="4" placeholder="login_id,name,bus&#10;21CS001,Asha,12"></textarea>
+<button onclick="imp()">Import</button><div id="imsg" class="note"></div>
+<h4>Usage analytics (aggregated)</h4><button class="alt" onclick="ana()">Refresh</button><div id="ana"></div></div>
+</main><script>
+const $=id=>document.getElementById(id);let portal='college',role=null;
+const BLURB={college:'Students: one fixed bus for morning and evening, with live seats.',
+private:'Employees and riders of private shuttles and operators: roster-based buses and shifts.',
+government:'Public buses (sandbox, sample data): open ridership, boardings counted against capacity. Accounts are added by the depot.'};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(p,b){const r=await fetch(p,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{});let j={};try{j=await r.json()}catch(e){}return [r.status,j]}
+async function pick(p){portal=p;for(const k of ['college','private','government'])$('t-'+k).classList.toggle('on',k==p);
+ $('blurb').textContent=BLURB[p];$('signupbtn').classList.toggle('hide',p=='government');
+ const [,orgs]=await api('/api/orgs');$('org').innerHTML=(orgs||[]).filter(o=>o.org_type==p).map(o=>`<option value="${esc(o.code)}">${esc(o.name)}</option>`).join('')||'<option value="">No organisation yet</option>'}
+const body=()=>({portal,org_code:$('org').value,login_id:$('lid').value,password:$('pw').value,name:$('name').value});
+async function signup(){const[s,d]=await api('/api/register',body());$('amsg').textContent=d.message}
+async function login(){const[s,d]=await api('/api/login',body());$('amsg').textContent=s==200?'':d.message;if(s==200)load()}
+async function logout(){await api('/api/logout',{});location.reload()}
+async function load(){const[s,m]=await api('/api/me');if(s!=200)return;$('auth').classList.add('hide');role=m.role;
+ if(m.role=='rider'){$('rider').classList.remove('hide');
+  $('info').innerHTML=`<p><b>${esc(m.name)}</b><br>${esc(m.org.name)} · ID ${esc(m.login_id)}</p>`+
+  (m.org.type=='government'?`<p>Pass holder. Boardings recorded: <b>${m.boardings_total}</b></p><p class="note">Open ridership: no fixed bus.</p>`:
+   m.bus?`<p>Assigned bus: <b>${esc(m.bus.bus_number)}</b><br>Seats left this trip: <b>${m.bus.seats_left}</b> of ${m.bus.capacity}<br>Status: <b>${m.bus.boarded_this_trip?'Boarded':'Not yet boarded'}</b></p>`:'<p>No bus assigned yet. Ask your administrator.</p>');
+  setInterval(()=>api('/api/me').then(([s,m2])=>{if(s==200&&m2.role=='rider'&&m2.bus)load2(m2)}),8000)}
+ else{$('staff').classList.remove('hide');dash();if(m.role=='admin'){$('admin').classList.remove('hide');riders()}}}
+function load2(m){load()}
+async function dash(){const[s,d]=await api('/api/dashboard');if(s!=200)return;
+ const seen=d.scanner_last_seen?'Scanner last seen: '+esc(d.scanner_last_seen):'Scanner has not connected yet';
+ $('dash').innerHTML=`<p>Trip: ${esc(d.trip)}<br><span class="note">${seen}</span></p><table><tr><th>Bus</th><th>Boarded</th><th>Seats left</th></tr>`+
+ d.buses.map(b=>`<tr><td>${esc(b.bus_number)}</td><td>${b.boarded}/${b.capacity}</td><td>${b.seats_left}</td></tr>`).join('')+'</table>'}
+async function board(){const[s,d]=await api('/api/staff/board',{login_id:$('mid').value,bus:$('mbus').value,shift:$('mshift').value||null});$('bmsg').textContent=d.result+': '+d.message;dash()}
+async function addBus(){const[s,d]=await api('/api/admin/buses',{bus_number:$('bn').value,capacity:$('bc').value});$('busmsg').textContent=d.message;dash()}
+async function riders(){const[s,d]=await api('/api/admin/riders');if(s!=200)return;
+ $('riders').innerHTML='<table><tr><th>ID</th><th>Name</th><th>Bus</th><th>Card</th></tr>'+d.map(r=>`<tr><td>${esc(r.login_id)}</td><td>${esc(r.name)}</td><td>${esc(r.bus||'-')}</td><td>${r.card_linked?'yes':'no'}</td></tr>`).join('')+'</table>'}
+async function assign(){const[s,d]=await api('/api/admin/riders/assign',{login_id:$('al').value,bus:$('ab').value});$('rmsg').textContent=d.message;riders()}
+async function enrol(){const[s,d]=await api('/api/admin/riders/enrol',{login_id:$('al').value});$('rmsg').textContent=d.message;setTimeout(riders,15000)}
+async function imp(){const[s,d]=await api('/api/admin/riders/import',{csv:$('csv').value});
+ $('imsg').innerHTML=s!=200?esc(d.message):`Created ${d.created.length}. Temporary passwords (shown once): `+d.created.map(c=>esc(c.login_id)+' = '+esc(c.temp_password)).join(', ')+(d.errors.length?'<br>Errors: '+d.errors.map(e=>'line '+e.line+': '+esc(e.error)).join('; '):'');riders()}
+async function ana(){const[s,d]=await api('/api/admin/analytics');if(s!=200)return;
+ $('ana').innerHTML='<table><tr><th>Bus</th><th>Trips</th><th>Avg/trip</th><th>Avg fill</th></tr>'+d.buses.map(b=>`<tr><td>${esc(b.bus_number)}</td><td>${b.trips}</td><td>${b.avg_per_trip}</td><td>${b.avg_fill_percent}%</td></tr>`).join('')+'</table>'}
+pick('college');load();setInterval(()=>{if(role&&role!='rider')dash()},5000);
+</script></body></html>
